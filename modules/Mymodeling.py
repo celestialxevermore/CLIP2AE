@@ -287,7 +287,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
         vaet_video=vaet_video.float()
         vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
-        print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
+        #print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
         visual_output, decoded_output = self.get_visual_output(vaet_video, video_mask, video_frame=video_frame)
 

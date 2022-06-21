@@ -116,7 +116,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     if args.sim_header == "tightTransf":
         print("<<<<<<<<<<<<sim_header == tightTransf>>>>>>>>>>")
         args.loose_type = False
-    print("<<<<<<<<<<<<sim_header != tightTransf>>>>>>>>>>")
+    #print("<<<<<<<<<<<<sim_header != tightTransf>>>>>>>>>>")
     # Check paramenters
     if args.gradient_accumulation_steps < 1:
         raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
@@ -219,10 +219,10 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
                          schedule='warmup_cosine', b1=0.9, b2=0.98, e=1e-6,
                          t_total=num_train_optimization_steps, weight_decay=weight_decay,
                          max_grad_norm=1.0)
-    print("<<<<before DDP>>>>")
+    #print("<<<<before DDP>>>>")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                       output_device=local_rank, find_unused_parameters=True)
-    print("<<<<after DDP>>>>")
+    #print("<<<<after DDP>>>>")
     return optimizer, scheduler, model
 
 def save_model(epoch, args, model, optimizer, tr_loss, type_name=""):
@@ -272,7 +272,7 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
             batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
 
         input_ids, input_mask, segment_ids, video, video_mask = batch
-        print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
+        #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
         
         #video = torch.HalfTensor(video)
         ##### 20220613 이 부분에 loss를 추가할 것. 
