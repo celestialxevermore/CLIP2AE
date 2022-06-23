@@ -295,7 +295,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         # vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
         #print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
-        visual_output, decoded_output,vaet_video = self.get_visual_output(vaet_video, video_mask, video_frame=video_frame)
+        visual_output, decoded_output,vaet_video = self.get_visual_output(video, video_mask, video_frame=video_frame)
 
         # visual_output : MSVD_DATASET => B*F, Grid^2+1, 512
         # decoded_output : b*pair, channel, h, w, video_frame
