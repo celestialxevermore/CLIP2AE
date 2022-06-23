@@ -373,7 +373,8 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         for bid, batch in enumerate(test_dataloader):
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
-            print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
+            print("processing..")
+            #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
             if multi_sentence_:
                 # multi-sentences retrieval means: one clip has two or more descriptions.
                 b, *_t = video.shape
