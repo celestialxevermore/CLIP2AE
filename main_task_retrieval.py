@@ -21,7 +21,7 @@ from dataloaders.data_dataloaders import DATALOADER_DICT
 import os
 #os.environ["PL_TORCH_DISTRIBUTED_BACKEND"]="gloo"
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="5,6"
+os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2,3,4,5,6,7"
 
 
 
@@ -222,7 +222,7 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
     #print("<<<<before DDP>>>>")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                       output_device=local_rank, find_unused_parameters=True)
-    #print("<<<<after DDP>>>>")
+    print("<<<<after DDP>>>>")
     return optimizer, scheduler, model
 
 def save_model(epoch, args, model, optimizer, tr_loss, type_name=""):
@@ -373,7 +373,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         for bid, batch in enumerate(test_dataloader):
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
-            #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
+            print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
             if multi_sentence_:
                 # multi-sentences retrieval means: one clip has two or more descriptions.
                 b, *_t = video.shape
@@ -386,6 +386,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
 
                 if len(filter_inds) > 0:
                     video, video_mask = video[filter_inds, ...], video_mask[filter_inds, ...]
+                    
                     visual_output,_,_ = model.get_visual_output(video, video_mask)
                     batch_visual_output_list.append(visual_output)
                     batch_list_v.append((video_mask,))

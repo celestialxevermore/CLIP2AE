@@ -366,7 +366,8 @@ class VAeT(nn.Module):
         video_frame = x.shape[2] # video frame
         #x = x.float16()
         #x = torch.cuda.HalfTensor(x)
-        # x = x.permute(0,1,3,4,5,6,2) # 1, 1 1 3 224 224 16
+        print("<<<<x shape : {}>>>>".format(x.shape))
+        #x = x.permute(0,1,3,4,5,6,2) # 1 1 1 3 224 224 16
         #x = x.reshape(-1, x.shape[-4],x.shape[-3], x.shape[-2], video_frame)
         #x = torch.FloatTensor(x,dtype= float8)
         encoded, decoded = self.AE(x)
