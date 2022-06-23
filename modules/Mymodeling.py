@@ -288,11 +288,19 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         video_mask = video_mask.view(-1, video_mask.shape[-1])
 
         video = torch.as_tensor(video).float()
+<<<<<<< HEAD
         # b, pair, bs, ts, channel, h, w = video.shape
         # video_frame = bs * ts
         # vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
         # vaet_video=vaet_video.float()
         # vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
+=======
+#         b, pair, bs, ts, channel, h, w = video.shape
+#         video_frame = bs * ts
+#         vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
+#         vaet_video=vaet_video.float()
+#         vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
+>>>>>>> b634adda426ac8ef4e166376b07c7e0d12f0825d
         #print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
         visual_output, decoded_output,vaet_video = self.get_visual_output(video, video_mask, video_frame=video_frame)
