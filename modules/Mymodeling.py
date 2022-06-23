@@ -269,11 +269,17 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
     def get_visual_output(self, video, video_mask, video_frame=-1):
   
         bs_pair = video_mask.size(0)
+        video = torch.as_tensor(video).float()
+        b, pair, bs, ts, channel, h, w = video.shape
+        video_frame = bs * ts
+        vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
+        vaet_video=vaet_video.float()
+        vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
         visual_hidden, decoded = self.clip.encode_image(video, video_frame=video_frame)
         # visual_hidden = visual_hidden.view(bs_pair, -1, visual_hidden.size(-1))
         # (1, 512)로 이미 맞춰기 때문에 pooling을 위한 reshape가 필요 없다.
 
-        return visual_hidden, decoded
+        return visual_hidden, decoded,vaet_video
     #video 4D
     def get_sequence_visual_output(self, input_ids, token_type_ids, attention_mask, video, video_mask, shaped=False, video_frame=-1):
         input_ids = input_ids.view(-1, input_ids.shape[-1])
@@ -289,7 +295,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
         #print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
-        visual_output, decoded_output = self.get_visual_output(vaet_video, video_mask, video_frame=video_frame)
+        visual_output, decoded_output,vaet_video = self.get_visual_output(vaet_video, video_mask, video_frame=video_frame)
 
         # visual_output : MSVD_DATASET => B*F, Grid^2+1, 512
         # decoded_output : b*pair, channel, h, w, video_frame
