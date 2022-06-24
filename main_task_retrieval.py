@@ -21,7 +21,7 @@ from dataloaders.data_dataloaders import DATALOADER_DICT
 import os
 #os.environ["PL_TORCH_DISTRIBUTED_BACKEND"]="gloo"
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="0,1,2,3,4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"]="6"
 
 
 
@@ -219,7 +219,8 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
                          schedule='warmup_cosine', b1=0.9, b2=0.98, e=1e-6,
                          t_total=num_train_optimization_steps, weight_decay=weight_decay,
                          max_grad_norm=1.0)
-    #print("<<<<before DDP>>>>")
+    
+    print("<<<<before DDP>>>>")
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                       output_device=local_rank, find_unused_parameters=True)
     print("<<<<after DDP>>>>")
@@ -272,7 +273,9 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
             batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
 
         input_ids, input_mask, segment_ids, video, video_mask = batch
-        #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
+        # print("input_ids : {} video : {} ".format(input_ids,video))
+        # input_ = input()
+        # #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
         
         #video = torch.HalfTensor(video)
         ##### 20220613 이 부분에 loss를 추가할 것. 
@@ -328,7 +331,9 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
             b1b2_logits = b1b2_logits.cpu().detach().numpy()
             each_row.append(b1b2_logits)
         each_row = np.concatenate(tuple(each_row), axis=-1)
-        sim_matrix.append(each_row)
+        sim_matrix.append(each_row.astype(np.float32))
+    
+    print("run on single gpu : {}".format(sim_matrix)) # 2
     return sim_matrix
 
 def eval_epoch(args, model, test_dataloader, device, n_gpu):
@@ -354,7 +359,8 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         sentence_num_ = test_dataloader.dataset.sentence_num
         video_num_ = test_dataloader.dataset.video_num
         cut_off_points_ = [itm - 1 for itm in cut_off_points_]
-        print("multi_sentence : {} cut_off_points : {} sentencce_num : {} video_mum_ : {}".format(multi_sentence_,cut_off_points_,sentence_num_,video_num_))
+        print("multi_sentence : {} cut_off_points : {} sentence_num : {} video_num_ : {}".format(multi_sentence_,cut_off_points_,sentence_num_,video_num_))
+        #sentnece_num : 606 video_num : 16 
     if multi_sentence_:
         logger.warning("Eval under the multi-sentence per video clip setting.")
         logger.warning("sentence num: {}, video num: {}".format(sentence_num_, video_num_))
@@ -371,8 +377,10 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         # 1. cache the features
         # ----------------------------
         for bid, batch in enumerate(test_dataloader):
+            print("test dataloader bid : {} batch : {}".format(bid,batch))
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
+            
             print("processing..")
             #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
             if multi_sentence_:
@@ -443,9 +451,22 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
         else:
             sim_matrix = _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_list, batch_visual_output_list)
+            print("1 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
+            sim_matrix_weird = sim_matrix
+            
+            #sim_matrix_weird = np.concatenate(tuple(sim_matrix),axis=0)
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
-
+            print("2 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
+            # 
     if multi_sentence_:
+        print("multi_sentence : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
+        # (606,)
+        print("<<<<<<<<<<<<>>>>>>>>>>>>>>>>")
+        print("weird : sim_matrix_weird : {} sim_matrix_weird type : {} sim_matrix_weird len : {}".format(sim_matrix_weird,type(sim_matrix),len(sim_matrix_weird)))
+        #sim_matrix=[]
+        # print("<<<<< sim_matrix_weird : {}".format(sim_matrix_weird))
+        # for i in range(len(sim_matrix_weird)):
+        #     sim_matrix.append(sim_matrix_weird[i])
         logger.info("before reshape, sim matrix size: {} x {}".format(sim_matrix.shape[0], sim_matrix.shape[1]))
         cut_off_points2len_ = [itm + 1 for itm in cut_off_points_]
         max_length = max([e_-s_ for s_, e_ in zip([0]+cut_off_points2len_[:-1], cut_off_points2len_)])
