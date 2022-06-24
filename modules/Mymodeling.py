@@ -241,16 +241,16 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             #vis output(ours) : [1 x 512]
             # decoded output(ours) : [1, 16, 3, 224, 224]
             #
-            sim_matrix, mse_loss = self.get_similarity_logits(sequence_output, visual_output, 
+            sim_matrix= self.get_similarity_logits(sequence_output, visual_output, 
                                         attention_mask, video_mask,shaped=True,loose_type=self.loose_type)
             mse_loss = self.get_mse_loss(decoded_output,vaet_video)
             sim_loss1 = self.loss_fct(sim_matrix)
             sim_loss2 = self.loss_fct(sim_matrix.T)
             sim_loss = (sim_loss1 + sim_loss2) / 2
-            loss += sim_loss
-            total += (sim_loss * (1-alpha) + mse_loss * alpha)
+            loss = sim_loss + mse_loss
+            #total += (sim_loss * (1-alpha) + mse_loss * alpha)
 
-            return total
+            return loss
         else:
             return None
 
@@ -330,7 +330,9 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         return retrieve_logits
 
     # text + video 사이의 sim_maatrix를 구하기 위한 작업
-    def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask, decoded,vaet_video,loose_type=False):
+    #sequence_output, visual_output, 
+     #                                   attention_mask, video_mask,shaped=True,loose_type=self.loose_type)
+    def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask,shaped=False, loose_type=False):
         
         
         visual_output_ = torch.clone(visual_output)
@@ -345,3 +347,4 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
     def get_mse_loss(self,decoded,vaet_video):
         mse_loss = nn.MSELoss()(vaet_video, decoded)
+        return mse_loss
