@@ -11,7 +11,7 @@ from torch import nn
 from modules.until_module import PreTrainedModel, AllGather, CrossEn
 from modules.module_cross import CrossModel, CrossConfig, Transformer as TransformerClip
 
-from modules.my_module_clip import CLIP, convert_weights
+from modules.module_clip import CLIP, convert_weights
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,6 @@ class CLIP4ClipPreTrainedModel(PreTrainedModel, nn.Module):
         task_config = None
         if "task_config" in kwargs.keys():
             task_config = kwargs["task_config"]
-            ###### 20220524 local rank
             if not hasattr(task_config, "local_rank"):
                 task_config.__dict__["local_rank"] = 0
             elif task_config.local_rank == -1:
@@ -61,53 +60,67 @@ class CLIP4ClipPreTrainedModel(PreTrainedModel, nn.Module):
             #         contain_conv2 = True
             #         break
             # if contain_conv2 is False and hasattr(model.clip.visual, "conv2"):
-            #     print("model.clip.visual :",model.clip.visual)
             #     cp_weight = state_dict["clip.visual.conv1.weight"].clone()
-
-
-            #     ################### 층 하나 통과 한 cp_weight를 만들기 그 cp는 VaeT의 shape와 같음 ######
-            #     print("cp_weight :",cp_weight.shape)
             #     kernel_size = model.clip.visual.conv2.weight.size(2)
-            #     print("kernel size : ",kernel_size)
             #     conv2_size = model.clip.visual.conv2.weight.size()
-            #     print("conv2_size :",conv2_size)
             #     conv2_size = list(conv2_size)
-            #     print("conv2_size :",conv2_size)
 
             #     left_conv2_size = conv2_size.copy()
-            #     print("left_conc2_size :",left_conv2_size)
             #     right_conv2_size = conv2_size.copy()
-            #     print("right conv2_size :",right_conv2_size)
             #     left_conv2_size[2] = (kernel_size - 1) // 2
-            #     print("left_conv2_size[2] shape :",left_conv2_size[2])
             #     right_conv2_size[2] = kernel_size - 1 - left_conv2_size[2]
-            #     print("right_conv2_size[2] shape :",right_conv2_size[2])
+
             #     left_zeros, right_zeros = None, None
             #     if left_conv2_size[2] > 0:
             #         left_zeros = torch.zeros(*tuple(left_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
-            #         print("left_zeros shape :",left_zeros.shape)
             #     if right_conv2_size[2] > 0:
             #         right_zeros = torch.zeros(*tuple(right_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
-            #         print("right_zeros shape :",right_zeros.shape)
+
             #     cat_list = []
             #     if left_zeros != None: cat_list.append(left_zeros)
-            #     print("first cat list :",cat_list[-1].shape)
-            #     ###20220620 변경
-            #     #cat_list.append(cp_weight.unsqueeze(2))
-            #     cp_weight = torch.randn(768,64,3,7,1) 
-            #     cat_list.append(cp_weight)
-            #     print("second cat_list :",cat_list[-1].shape)
+            #     cat_list.append(cp_weight.unsqueeze(2))
             #     if right_zeros != None: cat_list.append(right_zeros)
-            #     print("third cat_list :",cat_list[-1].shape)
-            #     print("<<<cat_list : {} >>>".format(len(cat_list)))
-            #     print("<<<cat 1 : {} cat 2 : {} cat 3 : {}".format(len(cat_list[0]), len(cat_list[1]),len(cat_list[2])))
-            #     print("shape 1 : {} shape 2 : {} shape 3 : {}".format(cat_list[0].shape,cat_list[1].shape,cat_list[2].shape))
-            #     print("<<< before >>>")
             #     cp_weight = torch.cat(cat_list, dim=2)
-            #     print("<<< after >>>")
+
             #     state_dict["clip.visual.conv2.weight"] = cp_weight
             pass
 
+        if model.sim_header == 'tightTransf':
+            contain_cross = False
+            for key in state_dict.keys():
+                if key.find("cross.transformer") > -1:
+                    contain_cross = True
+                    break
+            if contain_cross is False:
+                for key, val in clip_state_dict.items():
+                    if key == "positional_embedding":
+                        state_dict["cross.embeddings.position_embeddings.weight"] = val.clone()
+                        continue
+                    if key.find("transformer.resblocks") == 0:
+                        num_layer = int(key.split(".")[2])
+
+                        # cut from beginning
+                        if num_layer < task_config.cross_num_hidden_layers:
+                            state_dict["cross."+key] = val.clone()
+                            continue
+
+        if model.sim_header == "seqLSTM" or model.sim_header == "seqTransf":
+            contain_frame_position = False
+            for key in state_dict.keys():
+                if key.find("frame_position_embeddings") > -1:
+                    contain_frame_position = True
+                    break
+            if contain_frame_position is False:
+                for key, val in clip_state_dict.items():
+                    if key == "positional_embedding":
+                        state_dict["frame_position_embeddings.weight"] = val.clone()
+                        continue
+                    if model.sim_header == "seqTransf" and key.find("transformer.resblocks") == 0:
+                        num_layer = int(key.split(".")[2])
+                        # cut from beginning
+                        if num_layer < task_config.cross_num_hidden_layers:
+                            state_dict[key.replace("transformer.", "transformerClip.")] = val.clone()
+                            continue
         ## <=== End of initialization trick
 
         if state_dict is not None:
@@ -186,7 +199,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         show_log(task_config, "\t transformer_heads: {}".format(transformer_heads))
         show_log(task_config, "\t transformer_layers: {}".format(transformer_layers))
 
-        self.linear_patch = '3d'
+        self.linear_patch = '2d'
         if hasattr(task_config, "linear_patch"):
             self.linear_patch = task_config.linear_patch
             show_log(task_config, "\t\t linear_patch: {}".format(self.linear_patch))
@@ -194,8 +207,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         # use .float() to avoid overflow/underflow from fp16 weight. https://github.com/openai/CLIP/issues/40
         cut_top_layer = 0
         show_log(task_config, "\t cut_top_layer: {}".format(cut_top_layer))
-
-        #CLIP = text transformer + VAeT
         self.clip = CLIP(
             embed_dim,
             image_resolution, vision_layers-cut_top_layer, vision_width, vision_patch_size,
@@ -208,50 +219,68 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
                 del clip_state_dict[key]
 
         convert_weights(self.clip)
-
-
+        # <=== End of CLIP Encoders
 
         self.sim_header = 'meanP'
-        # 20220620 아래 4개 코드 주석 처리함 
         # if hasattr(task_config, "sim_header"):
         #     self.sim_header = task_config.sim_header
         #     show_log(task_config, "\t sim_header: {}".format(self.sim_header))
         # if self.sim_header == "tightTransf": assert self.loose_type is False
 
+        # cross_config.max_position_embeddings = context_length
+        # if self.loose_type is False:
+        #     # Cross Encoder ===>
+        #     cross_config = update_attr("cross_config", cross_config, "num_hidden_layers", self.task_config, "cross_num_hidden_layers")
+        #     self.cross = CrossModel(cross_config)
+        #     # <=== End of Cross Encoder
+        #     self.similarity_dense = nn.Linear(cross_config.hidden_size, 1)
+
+        # if self.sim_header == "seqLSTM" or self.sim_header == "seqTransf":
+        #     self.frame_position_embeddings = nn.Embedding(cross_config.max_position_embeddings, cross_config.hidden_size)
+        # if self.sim_header == "seqTransf":
+        #     self.transformerClip = TransformerClip(width=transformer_width, layers=self.task_config.cross_num_hidden_layers,
+        #                                            heads=transformer_heads, )
+        # if self.sim_header == "seqLSTM":
+        #     self.lstm_visual = nn.LSTM(input_size=cross_config.hidden_size, hidden_size=cross_config.hidden_size,
+        #                                batch_first=True, bidirectional=False, num_layers=1)
+
         self.loss_fct = CrossEn()
+
         self.apply(self.init_weights)
 
-
-    # video : 7D
     def forward(self, input_ids, token_type_ids, attention_mask, video, video_mask=None):
         input_ids = input_ids.view(-1, input_ids.shape[-1])
         token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
         attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
         video_mask = video_mask.view(-1, video_mask.shape[-1])
 
-        video_frame = video.shape[2]* video.shape[3]
-        sequence_output, visual_output, decoded_output,vaet_video = self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
+        # T x 3 x H x W
+        video = torch.as_tensor(video).float()
+        vaet_video = torch.as_tensor(video).float()
+        vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
+        
+        b, pair, bs, ts, channel, h, w = video.shape
+        video = video.view(b * pair * bs * ts, channel, h, w)
+        video_frame = bs * ts
+        veat_video = vaet_video.reshape(b*pair,channel,h,w,video_frame)
+        
+        ####
+        
+
+        sequence_output, visual_output= self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
                                                                          video, video_mask, shaped=True, video_frame=video_frame)
 
+        decoded_output = self.get_vaet_visual_output(vaet_video,video_mask,shaped=True,video_frame = video_frame)
         if self.training:
-            total = 0.
             loss = 0.
-            alpha = 0.5
-            #seq output : [1 x 512] 
-            #vis output(ours) : [1 x 512]
-            # decoded output(ours) : [1, 16, 3, 224, 224]
-            #
-            sim_matrix= self.get_similarity_logits(sequence_output, visual_output, 
-                                        attention_mask, video_mask,shaped=True,loose_type=self.loose_type)
-
-            mse_loss = self.get_mse_loss(decoded_output,vaet_video)
-            print("<<<<<forward : sim_matrix shape {} >>>>>".format(sim_matrix.shape))
+            sim_matrix, *_tmp = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
+                                                    shaped=True, loose_type=self.loose_type)
             sim_loss1 = self.loss_fct(sim_matrix)
             sim_loss2 = self.loss_fct(sim_matrix.T)
             sim_loss = (sim_loss1 + sim_loss2) / 2
-            loss = sim_loss + mse_loss
-            #total += (sim_loss * (1-alpha) + mse_loss * alpha)
-
+            loss += sim_loss
+            mse_loss = self.get_mse_loss(decoded_output,vaet_video)
+            loss += mse_loss
             return loss
         else:
             return None
@@ -263,45 +292,90 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
 
         bs_pair = input_ids.size(0)
-        sequence_hidden = self.clip.encode_text(input_ids)
+        sequence_hidden = self.clip.encode_text(input_ids).float()
         sequence_hidden = sequence_hidden.view(bs_pair, -1, sequence_hidden.size(-1))
 
         return sequence_hidden
 
-    def get_visual_output(self, video, video_mask, video_frame=-1):
-  
+    def get_visual_output(self, video, video_mask, shaped=False, video_frame=-1):
+        #b=pair=bs=ts=channel=h=w=0
+        if shaped is False: #7차원이 들어와버린 경우
+            video_mask = video_mask.view(-1, video_mask.shape[-1])
+            video = torch.as_tensor(video).float()
+            b, pair, bs, ts, channel, h, w = video.shape
+            #print("b :",b)
+            #b = video.shape[0],pair=video.shape[1],bs = video.shape[2],ts=video.shape[3],channel=video.shape[4],h=video.shape[5],w=video.shape[6]
+            video = video.view(b * pair * bs * ts, channel, h, w)
+            video_frame = bs * ts
+        
+        vaet_video = video.view(-1,1,16,1,3,224,224)
+        vaet_video = torch.as_tensor(vaet_video).float()
+        vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
+        vaet_video = vaet_video.reshape(vaet_video.shape[0] * vaet_video.shape[1],3,224,224,16)
         bs_pair = video_mask.size(0)
-        video = torch.as_tensor(video).float()
-        b, pair, bs, ts, channel, h, w = video.shape
-        video_frame = bs * ts
-        vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
-        vaet_video=vaet_video.float()
-        vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
-        visual_hidden, decoded = self.clip.encode_image(vaet_video, video_frame=video_frame)
-        # visual_hidden = visual_hidden.view(bs_pair, -1, visual_hidden.size(-1))
-        # (1, 512)로 이미 맞춰기 때문에 pooling을 위한 reshape가 필요 없다.
-        print("<<<<<get_visual_output : visual_hidden shape : {}>>>>>".format(visual_hidden.shape))
-        return visual_hidden, decoded,vaet_video
-    #video 4D
+        print("<<<<vaet_video type : {} video_frame type : {}".format(type(vaet_video),type(video_frame)))
+        visual_hidden = self.clip.encode_image(vaet_video, video_frame=video_frame).float()
+        #decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame)
+        #print("<<<<type of visual_hidden, decoded : {} {}".format(type(visual_hidden),type(decoded)))
+        #print("visaul hidden shape : {} decoded shape : {}".format(visual_hidden.shape, decoded.shape))
+        visual_hidden = visual_hidden.type(self.dtype)
+        #decoded = decoded.type(self.dtype)
+        #a = input()
+        #visual_hidden = visual_hidden.view(bs_pair, -1, visual_hidden.size(-1))
+
+        return visual_hidden
+
+    def get_vaet_visual_output(self,video,video_mask,shaped=False,video_frame=-1):
+        if shaped is False: #7차원이 들어와버린 경우
+            video_mask = video_mask.view(-1, video_mask.shape[-1])
+            video = torch.as_tensor(video).float()
+            b, pair, bs, ts, channel, h, w = video.shape
+        
+        vaet_video = video.view(-1,1,16,1,3,224,224)
+        vaet_video = torch.as_tensor(vaet_video).float()
+        vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
+        b, pair, bs, ts, channel, h, w = vaet_video.shape
+        vaet_video = vaet_video.view(b*pair,3,224,224,video_frame)
+        # b : 16 pair : 1 bs : 1 ts : 3 channel : 224 h : 224 : w : 16
+        print("b : {} pair : {} bs : {} ts : {} channel : {} h : {} w : {}".format(b,pair,bs,ts,channel,h,w))
+        #a = input()
+        bs_pair = video_mask.size(0)
+        
+        decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame).float()
+
+        return decoded
+        
+
+
     def get_sequence_visual_output(self, input_ids, token_type_ids, attention_mask, video, video_mask, shaped=False, video_frame=-1):
-        input_ids = input_ids.view(-1, input_ids.shape[-1])
-        token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
-        attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
-        video_mask = video_mask.view(-1, video_mask.shape[-1])
+        if shaped is False:
+            input_ids = input_ids.view(-1, input_ids.shape[-1])
+            token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
+            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
+            video_mask = video_mask.view(-1, video_mask.shape[-1])
 
-        video = torch.as_tensor(video).float()
-        # b, pair, bs, ts, channel, h, w = video.shape
-        # video_frame = bs * ts
-        # vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
-        # vaet_video=vaet_video.float()
-        # vaet_video = vaet_video.reshape(b*pair, channel, h, w, video_frame)
-        #print("<<<<vaet_video shape : {} >>>>>".format(vaet_video.shape))
+            video = torch.as_tensor(video).float()
+            b, pair, bs, ts, channel, h, w = video.shape
+            video = video.view(b * pair * bs * ts, channel, h, w)
+            video_frame = bs * ts
+
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
-        visual_output, decoded_output,vaet_video = self.get_visual_output(video, video_mask, video_frame=video_frame)
+        visual_output = self.get_visual_output(video, video_mask, shaped=True, video_frame=video_frame)
+        #decoded_output = self.get_vaet_visual_output(video,video_mask,shaped=True,video_frame=video_frame)
+        return sequence_output, visual_output
 
-        # visual_output : MSVD_DATASET => B*F, Grid^2+1, 512
-        # decoded_output : b*pair, channel, h, w, video_frame
-        return sequence_output, visual_output, decoded_output,vaet_video
+    def _get_cross_output(self, sequence_output, visual_output, attention_mask, video_mask):
+
+        concat_features = torch.cat((sequence_output, visual_output), dim=1)  # concatnate tokens and frames
+        concat_mask = torch.cat((attention_mask, video_mask), dim=1)
+        text_type_ = torch.zeros_like(attention_mask)
+        video_type_ = torch.ones_like(video_mask)
+        concat_type = torch.cat((text_type_, video_type_), dim=1)
+
+        cross_layers, pooled_output = self.cross(concat_features, concat_type, concat_mask, output_all_encoded_layers=True)
+        cross_output = cross_layers[-1]
+
+        return cross_output, pooled_output, concat_mask
 
     def _mean_pooling_for_similarity_sequence(self, sequence_output, attention_mask):
         attention_mask_un = attention_mask.to(dtype=torch.float).unsqueeze(-1)
@@ -316,38 +390,124 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         video_mask_un_sum = torch.sum(video_mask_un, dim=1, dtype=torch.float)
         video_mask_un_sum[video_mask_un_sum == 0.] = 1.
         video_out = torch.sum(visual_output, dim=1) / video_mask_un_sum
-        #print("video_out shpe :",video_out.shape)
         return video_out
 
+    def _mean_pooling_for_similarity(self, sequence_output, visual_output, attention_mask, video_mask,):
+        text_out = self._mean_pooling_for_similarity_sequence(sequence_output, attention_mask)
+        video_out = self._mean_pooling_for_similarity_visual(visual_output, video_mask)
+
+        return text_out, video_out
+
     def _loose_similarity(self, sequence_output, visual_output, attention_mask, video_mask, sim_header="meanP"):
-        #sequence_output, visual_output = torch.tensor(sequence_output),torch.tensor(visual_output)
-        sequence_output, visual_output = sequence_output.contiguous(), visual_output.contiguous()
-        #sequence_output, visual_output = sequence_output.float(), visual_output.float()
+        #sequence_output, visual_output = sequence_output.type(self.dtype), visual_output.type(self.dtype)
+        print("before : s o type : {} v p type : {}".format(type(sequence_output),type(visual_output)))
+        # sequence_output = torch.as_tensor(sequence_output)
+        # visual_output = torch.as_tensor(visual_output)
+        if sim_header == "meanP":
+            # Default: Parameter-free type
+            pass
+        elif sim_header == "seqLSTM":
+            # Sequential type: LSTM
+            visual_output_original = visual_output
+            visual_output = pack_padded_sequence(visual_output, torch.sum(video_mask, dim=-1).cpu(),
+                                                 batch_first=True, enforce_sorted=False)
+            visual_output, _ = self.lstm_visual(visual_output)
+            if self.training: self.lstm_visual.flatten_parameters()
+            visual_output, _ = pad_packed_sequence(visual_output, batch_first=True)
+            visual_output = torch.cat((visual_output, visual_output_original[:, visual_output.size(1):, ...].contiguous()), dim=1)
+            visual_output = visual_output + visual_output_original
+        elif sim_header == "seqTransf":
+            # Sequential type: Transformer Encoder
+            visual_output_original = visual_output
+            seq_length = visual_output.size(1)
+            position_ids = torch.arange(seq_length, dtype=torch.long, device=visual_output.device)
+            position_ids = position_ids.unsqueeze(0).expand(visual_output.size(0), -1)
+            frame_position_embeddings = self.frame_position_embeddings(position_ids)
+            visual_output = visual_output + frame_position_embeddings
+
+            extended_video_mask = (1.0 - video_mask.unsqueeze(1)) * -1000000.0
+            extended_video_mask = extended_video_mask.expand(-1, video_mask.size(1), -1)
+            visual_output = visual_output.permute(1, 0, 2)  # NLD -> LND
+            visual_output = self.transformerClip(visual_output, extended_video_mask)
+            visual_output = visual_output.permute(1, 0, 2)  # LND -> NLD
+            visual_output = visual_output + visual_output_original
+
+        if self.training:
+            visual_output = allgather(visual_output, self.task_config)
+            video_mask = allgather(video_mask, self.task_config)
+            sequence_output = allgather(sequence_output, self.task_config)
+            torch.distributed.barrier()
+
         visual_output = visual_output / visual_output.norm(dim=-1, keepdim=True)
+        #20220627
+        #visual_output = self._mean_pooling_for_similarity_visual(visual_output, video_mask)
+        #visual_output = visual_output / visual_output.norm(dim=-1, keepdim=True)
+
         sequence_output = sequence_output.squeeze(1)
         sequence_output = sequence_output / sequence_output.norm(dim=-1, keepdim=True)
-        #print("<<<<< visual output shape : {} sequence output shape : {}".format(visual_output.shape,sequence_output.shape))
+
         logit_scale = self.clip.logit_scale.exp()
-        retrieve_logits = logit_scale * torch.matmul(sequence_output, visual_output.t()) # (1,)
-        #print("<<<<< retrieval_logits shape : {} >>>>>>".format(retrieve_logits.shape))
+        retrieve_logits = logit_scale * torch.matmul(sequence_output, visual_output.t())
         return retrieve_logits
 
-    # text + video 사이의 sim_maatrix를 구하기 위한 작업
-    #sequence_output, visual_output, 
-     #                                   attention_mask, video_mask,shaped=True,loose_type=self.loose_type)
-    def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask,shaped=False, loose_type=False):
-        
-        
-        #visual_output_ = torch.clone(visual_output)
-        
-        #visual_output_ = visual_output_.reshape(visual_output_.shape[0],3,224,224,16)
-        #print("1 <<<<< visual output : {} visual output_ : {} decoded : {}>>>>>".format(visual_output.shape, visual_output_.shape,decoded.shape))
-        #assert visual_output_.shape == decoded.shape 
-        #mse_loss = nn.MSELoss()(vaet_video, decoded)
-        retrieve_logits = self._loose_similarity(sequence_output, visual_output, attention_mask, video_mask, sim_header=self.sim_header)
-        print("<<<<<get_similarity_logits : retireve_logits shape >>>>>:",retrieve_logits.shape)
-        return retrieve_logits  
+    def _cross_similarity(self, sequence_output, visual_output, attention_mask, video_mask):
+        sequence_output, visual_output = sequence_output.contiguous(), visual_output.contiguous()
+
+        b_text, s_text, h_text = sequence_output.size()
+        b_visual, s_visual, h_visual = visual_output.size()
+
+        retrieve_logits_list = []
+
+        step_size = b_text      # set smaller to reduce memory cost
+        split_size = [step_size] * (b_text // step_size)
+        release_size = b_text - sum(split_size)
+        if release_size > 0:
+            split_size += [release_size]
+
+        # due to clip text branch retrun the last hidden
+        attention_mask = torch.ones(sequence_output.size(0), 1)\
+            .to(device=attention_mask.device, dtype=attention_mask.dtype)
+
+        sequence_output_splits = torch.split(sequence_output, split_size, dim=0)
+        attention_mask_splits = torch.split(attention_mask, split_size, dim=0)
+        for i in range(len(split_size)):
+            sequence_output_row = sequence_output_splits[i]
+            attention_mask_row = attention_mask_splits[i]
+            sequence_output_l = sequence_output_row.unsqueeze(1).repeat(1, b_visual, 1, 1)
+            sequence_output_l = sequence_output_l.view(-1, s_text, h_text)
+            attention_mask_l = attention_mask_row.unsqueeze(1).repeat(1, b_visual, 1)
+            attention_mask_l = attention_mask_l.view(-1, s_text)
+
+            step_truth = sequence_output_row.size(0)
+            visual_output_r = visual_output.unsqueeze(0).repeat(step_truth, 1, 1, 1)
+            visual_output_r = visual_output_r.view(-1, s_visual, h_visual)
+            video_mask_r = video_mask.unsqueeze(0).repeat(step_truth, 1, 1)
+            video_mask_r = video_mask_r.view(-1, s_visual)
+
+            cross_output, pooled_output, concat_mask = \
+                self._get_cross_output(sequence_output_l, visual_output_r, attention_mask_l, video_mask_r)
+            retrieve_logits_row = self.similarity_dense(pooled_output).squeeze(-1).view(step_truth, b_visual)
+
+            retrieve_logits_list.append(retrieve_logits_row)
+
+        retrieve_logits = torch.cat(retrieve_logits_list, dim=0)
+        return retrieve_logits
+
+    def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask, shaped=False, loose_type=False):
+        if shaped is False:
+            attention_mask = attention_mask.view(-1, attention_mask.shape[-1])
+            video_mask = video_mask.view(-1, video_mask.shape[-1])
+
+        contrastive_direction = ()
+        if loose_type:
+            assert self.sim_header in ["meanP", "seqLSTM", "seqTransf"]
+            retrieve_logits = self._loose_similarity(sequence_output, visual_output, attention_mask, video_mask, sim_header=self.sim_header)
+        else:
+            assert self.sim_header in ["tightTransf"]
+            retrieve_logits = self._cross_similarity(sequence_output, visual_output, attention_mask, video_mask, )
+
+        return retrieve_logits, contrastive_direction
 
     def get_mse_loss(self,decoded,vaet_video):
-        mse_loss = nn.MSELoss()(vaet_video, decoded)
+        mse_loss = nn.MSELoss()(vaet_video,decoded)
         return mse_loss
