@@ -271,6 +271,8 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
                                                                          video, video_mask, shaped=True, video_frame=video_frame)
 
         decoded_output = self.get_vaet_visual_output(vaet_video,video_mask,shaped=True,video_frame = video_frame)
+        print("decoded output shape : {} vaet_video shape : {}".format(decoded_output.shape,vaet_video.shape))
+        #@a = input()
         if self.training:
             loss = 0.
             sim_matrix, *_tmp = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
@@ -279,6 +281,9 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             sim_loss2 = self.loss_fct(sim_matrix.T)
             sim_loss = (sim_loss1 + sim_loss2) / 2
             loss += sim_loss
+
+            vaet_video = vaet_video.view(-1,vaet_video.shape[-4],veat_video.shape[-3],vaet_video.shape[-2],vaet_video.shape[-1])
+            print("Reshaped vaet_video shape :",vaet_video.shape)
             mse_loss = self.get_mse_loss(decoded_output,vaet_video)
             loss += mse_loss
             return loss
@@ -342,7 +347,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         bs_pair = video_mask.size(0)
         
         decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame).float()
-
+        print("decoded shape : {}".format(decoded.shape))
         return decoded
         
 
