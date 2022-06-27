@@ -2,7 +2,6 @@
 Adapted from: https://github.com/openai/CLIP/blob/main/clip/clip.py
 """
 from collections import OrderedDict
-from pickletools import float8
 from typing import Tuple, Union
 
 import hashlib
@@ -127,7 +126,7 @@ class AttentionPool2d(nn.Module):
         self.num_heads = num_heads
 
     def forward(self, x):
-        x = x.reshape(x.shape[0], x.shape[1], x.shape[2] * x.shape[3]).permute(2, 0, 1).contiguous()  # NCHW -> (HW)NC
+        x = x.reshape(x.shape[0], x.shape[1], x.shape[2] * x.shape[3]).permute(2, 0, 1)  # NCHW -> (HW)NC
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
         x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
         x, _ = F.multi_head_attention_forward(
@@ -314,7 +313,7 @@ class AUTOENCODER(nn.Module):
     def forward(self, x ):
         #x = torch.cuda.HalfTensor(x)
         encoded = self.encoder4(self.encoder3(self.encoder2(self.encoder1(x))))
-        print("x type : {} encoded type : {}".format(type(x),type(encoded)))
+        #print("x type : {} encoded type : {}".format(type(x),type(encoded)))
         #en = en.float()
         encoded = torch.cuda.FloatTensor(encoded.float())
 
@@ -366,12 +365,15 @@ class VAeT(nn.Module):
         video_frame = x.shape[2] # video frame
         #x = x.float16()
         #x = torch.cuda.HalfTensor(x)
-        # x = x.permute(0,1,3,4,5,6,2) # 1, 1 1 3 224 224 16
+        #print("<<<<x shape : {}>>>>".format(x.shape))
+        #x = x.permute(0,1,3,4,5,6,2) # 1 1 1 3 224 224 16
         #x = x.reshape(-1, x.shape[-4],x.shape[-3], x.shape[-2], video_frame)
         #x = torch.FloatTensor(x,dtype= float8)
         encoded, decoded = self.AE(x)
         #x = torch.cuda.HalfTensor(x)
         #print("before : <<<<<< {} >>>>>".format(type(encoded)))
+
+        
         encoded = torch.cuda.HalfTensor(encoded.half())
         x = self.conv2(encoded) # result :
         #x = x.to(torch.float16)
@@ -381,13 +383,12 @@ class VAeT(nn.Module):
         x = x.reshape(-1,x.shape[-3],x.shape[-2]*x.shape[-1]).contiguous()
         x = x.permute(0,2,1).contiguous()
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype) 
+        #x = x + self.positional_embedding.to(x.dtype) 
         x = self.ln_pre(x)
         x = x.permute(1,0,2).contiguous()
         x = self.transformer(x,video_frame=1)
         x = x.permute(1,0,2).contiguous()
         return x, decoded
-
 
 class VisualTransformer(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int,
@@ -411,18 +412,16 @@ class VisualTransformer(nn.Module):
         # For 3D
         assert linear_patch in ['2d', '3d']
         self.linear_patch = linear_patch
-        if self.linear_patch == '3d': # 5D
+        if self.linear_patch == '3d':
             self.conv2 = nn.Conv3d(in_channels=3, out_channels=width, kernel_size=(3, patch_size, patch_size),
                                    stride=(1, patch_size, patch_size), padding=(1, 0, 0), bias=False)
-    # T x C x H x W 
+
     def forward(self, x: torch.Tensor, video_frame=-1):
-        ####Conv3D AE 20220526 #####
-        #x_3d shape : 
-        x_3d = x.reshape(-1, video_frame, x.shape[-3], x.shape[-2], x.shape[-1])
+
         if self.linear_patch == '3d':
             assert video_frame != -1
             x_3d = x.reshape(-1, video_frame, x.shape[-3], x.shape[-2], x.shape[-1])
-            x_3d = x_3d.permute(0, 2, 1, 3, 4) #
+            x_3d = x_3d.permute(0, 2, 1, 3, 4)
             x_3d = self.conv2(x_3d)     # shape = [*, width, frame, grid, grid]
             x_3d = x_3d.permute(0, 2, 1, 3, 4)      # shape = [*, frame, width, grid, grid]
             x = x_3d.reshape(-1, x_3d.shape[-3], x_3d.shape[-2], x_3d.shape[-1]).contiguous() # shape = [*, width, grid, grid]
@@ -432,16 +431,14 @@ class VisualTransformer(nn.Module):
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        x = x + self.positional_embedding.to(x.dtype) 
+        x = x + self.positional_embedding.to(x.dtype)
         x = self.ln_pre(x)
 
-        ################# TAE!!! #################### 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        ############### 원래 기존으로 가 #######################
         x = self.transformer(x, video_frame=video_frame)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
-        # Move the three lines below to `encode_input` for entire hidden sequence
+        # Move the three lines below to `encode_image` for entire hidden sequence
         # x = self.ln_post(x[:, 0, :])
         # if self.proj is not None:
         #     x = x @ self.proj
@@ -575,22 +572,31 @@ class CLIP(nn.Module):
         return self.visual.conv1.weight.dtype
 
     def encode_image(self, image, return_hidden=False, video_frame=-1):
-
-        #visual : VAeT
-        hidden,decoded = self.visual(image.type(self.dtype), video_frame=video_frame)
-        #image = torch.cuda.HalfTensor(image)
-        #hidden,decoded = self.visual(image, video_frame=video_frame)
-        ## proj가 기존에 쓰던 것과 shape 정체가 같은지 VAeT와. 20220607
+        hidden,_ = self.visual(image.type(self.dtype), video_frame=video_frame)
         hidden = self.visual.ln_post(hidden) @ self.visual.proj
-
+        print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
         x = hidden[:, 0, :]
-
-        # if return_hidden:
-        #     return x, hidden
-        
-
-        return x, decoded
-        #return x,decoded
+        print("x type :",type(x))
+        if return_hidden:
+            return x, hidden
+        hidden = hidden.type(self.dtype)
+        _ = _.type(self.dtype)
+        print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
+        return x 
+    
+    def encode_vaet_image(self,image,return_hidden=False,video_frame=-1):
+        print("<<<image shape : {} >>>".format(image.shape))
+        _,decoded = self.visual(image.type(self.dtype), video_frame=video_frame)
+        _ = self.visual.ln_post(_) @ self.visual.proj
+        print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
+        x = _[:, 0, :]
+        print("x type :",type(x))
+        if return_hidden:
+            return x, _
+        _ = _.type(self.dtype)
+        decoded = decoded.type(self.dtype)
+        print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
+        return decoded
 
     def encode_text(self, text, return_hidden=False):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
@@ -612,16 +618,8 @@ class CLIP(nn.Module):
 
         return x
 
-    def compute_loss(self, x, y):
-        mse = nn.MSELoss()
-        loss = mse(x, y)
-        return loss
-
-    # image 4D 20220607 
     def forward(self, image, text):
-        
-
-        image_features,decoded,video_frame = self.encode_image(image)
+        image_features = self.encode_image(image)
         text_features = self.encode_text(text)
 
         # normalized features
@@ -633,14 +631,10 @@ class CLIP(nn.Module):
         logits_per_image = logit_scale * image_features @ text_features.t()
         logits_per_text = logit_scale * text_features @ image_features.t()
 
+
+
         # shape = [global_batch_size, global_batch_size]
-
-        # AUTOENCODER
-        image_original = image.rehshape(-1, video_frame, image.reshape[-3], image.reshape[-2], image.reshape[-1])
-        mse_loss = self.compute_loss(image_original, decoded)
-
-        return logits_per_image, logits_per_text, mse_loss
-
+        return logits_per_image, logits_per_text
 
 
 def convert_weights(model: nn.Module):
@@ -675,7 +669,7 @@ def build_model(state_dict: dict):
         vision_layers = len([k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
         vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
         grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
-        input_resolution = vision_patch_size * grid_size
+        image_resolution = vision_patch_size * grid_size
     else:
         counts: list = [len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}"))) for b in [1, 2, 3, 4]]
         vision_layers = tuple(counts)
@@ -683,7 +677,7 @@ def build_model(state_dict: dict):
         output_width = round((state_dict["visual.attnpool.positional_embedding"].shape[0] - 1) ** 0.5)
         vision_patch_size = None
         assert output_width ** 2 + 1 == state_dict["visual.attnpool.positional_embedding"].shape[0]
-        input_resolution = output_width * 32
+        image_resolution = output_width * 32
 
     embed_dim = state_dict["text_projection"].shape[1]
     context_length = state_dict["positional_embedding"].shape[0]
@@ -694,7 +688,7 @@ def build_model(state_dict: dict):
 
     model = CLIP(
         embed_dim,
-        input_resolution, vision_layers, vision_width, vision_patch_size,
+        image_resolution, vision_layers, vision_width, vision_patch_size,
         context_length, vocab_size, transformer_width, transformer_heads, transformer_layers
     )
 
