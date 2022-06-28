@@ -54,36 +54,36 @@ class CLIP4ClipPreTrainedModel(PreTrainedModel, nn.Module):
 
         ## ===> Initialization trick [HARD CODE]
         if model.linear_patch == "3d":
-            # contain_conv2 = False
-            # for key in state_dict.keys():
-            #     if key.find("visual.conv2.weight") > -1:
-            #         contain_conv2 = True
-            #         break
-            # if contain_conv2 is False and hasattr(model.clip.visual, "conv2"):
-            #     cp_weight = state_dict["clip.visual.conv1.weight"].clone()
-            #     kernel_size = model.clip.visual.conv2.weight.size(2)
-            #     conv2_size = model.clip.visual.conv2.weight.size()
-            #     conv2_size = list(conv2_size)
+            contain_conv2 = False
+            for key in state_dict.keys():
+                if key.find("visual.conv2.weight") > -1:
+                    contain_conv2 = True
+                    break
+            if contain_conv2 is False and hasattr(model.clip.visual, "conv2"):
+                cp_weight = state_dict["clip.visual.conv1.weight"].clone()
+                kernel_size = model.clip.visual.conv2.weight.size(2)
+                conv2_size = model.clip.visual.conv2.weight.size()
+                conv2_size = list(conv2_size)
 
-            #     left_conv2_size = conv2_size.copy()
-            #     right_conv2_size = conv2_size.copy()
-            #     left_conv2_size[2] = (kernel_size - 1) // 2
-            #     right_conv2_size[2] = kernel_size - 1 - left_conv2_size[2]
+                left_conv2_size = conv2_size.copy()
+                right_conv2_size = conv2_size.copy()
+                left_conv2_size[2] = (kernel_size - 1) // 2
+                right_conv2_size[2] = kernel_size - 1 - left_conv2_size[2]
 
-            #     left_zeros, right_zeros = None, None
-            #     if left_conv2_size[2] > 0:
-            #         left_zeros = torch.zeros(*tuple(left_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
-            #     if right_conv2_size[2] > 0:
-            #         right_zeros = torch.zeros(*tuple(right_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
+                left_zeros, right_zeros = None, None
+                if left_conv2_size[2] > 0:
+                    left_zeros = torch.zeros(*tuple(left_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
+                if right_conv2_size[2] > 0:
+                    right_zeros = torch.zeros(*tuple(right_conv2_size), dtype=cp_weight.dtype, device=cp_weight.device)
 
-            #     cat_list = []
-            #     if left_zeros != None: cat_list.append(left_zeros)
-            #     cat_list.append(cp_weight.unsqueeze(2))
-            #     if right_zeros != None: cat_list.append(right_zeros)
-            #     cp_weight = torch.cat(cat_list, dim=2)
-
-            #     state_dict["clip.visual.conv2.weight"] = cp_weight
-            pass
+                cat_list = []
+                if left_zeros != None: cat_list.append(left_zeros)
+                cat_list.append(cp_weight.unsqueeze(2))
+                if right_zeros != None: cat_list.append(right_zeros)
+                cp_weight = torch.cat(cat_list, dim=2)
+                print("<<<<< cp_weight : {}>>>>>".format(cp_weight.shape))
+                state_dict["clip.visual.conv2.weight"] = cp_weight
+            
 
         if model.sim_header == 'tightTransf':
             contain_cross = False
@@ -256,13 +256,14 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         # T x 3 x H x W
         video = torch.as_tensor(video).float()
-        vaet_video = torch.as_tensor(video).float()
+        #vaet_video = torch.as_tensor(video).float()
+        vaet_video = video
         vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
         
         b, pair, bs, ts, channel, h, w = video.shape
         video = video.view(b * pair * bs * ts, channel, h, w)
         video_frame = bs * ts
-        veat_video = vaet_video.reshape(b*pair,channel,h,w,video_frame)
+        vaet_video = vaet_video.reshape(-1,channel,h,w,video_frame)
         
         ####
         
@@ -270,7 +271,10 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         sequence_output, visual_output= self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
                                                                          video, video_mask, shaped=True, video_frame=video_frame)
 
+        print("first vaet_video shape : {}".format(vaet_video.shape))
         decoded_output = self.get_vaet_visual_output(vaet_video,video_mask,shaped=True,video_frame = video_frame)
+        print("decoded output shape : {} vaet_video shape : {}".format(decoded_output.shape,vaet_video.shape))
+        #@a = input()
         if self.training:
             loss = 0.
             sim_matrix, *_tmp = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
@@ -279,6 +283,9 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             sim_loss2 = self.loss_fct(sim_matrix.T)
             sim_loss = (sim_loss1 + sim_loss2) / 2
             loss += sim_loss
+
+            vaet_video = vaet_video.view(-1,vaet_video.shape[-4],vaet_video.shape[-3],vaet_video.shape[-2],vaet_video.shape[-1])
+            print("Reshaped vaet_video shape :",vaet_video.shape)
             mse_loss = self.get_mse_loss(decoded_output,vaet_video)
             loss += mse_loss
             return loss
@@ -325,24 +332,25 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         return visual_hidden
 
-    def get_vaet_visual_output(self,video,video_mask,shaped=False,video_frame=-1):
+    def get_vaet_visual_output(self,vaet_video,video_mask,shaped=False,video_frame=-1):
+        
         if shaped is False: #7차원이 들어와버린 경우
             video_mask = video_mask.view(-1, video_mask.shape[-1])
             video = torch.as_tensor(video).float()
             b, pair, bs, ts, channel, h, w = video.shape
         
-        vaet_video = video.view(-1,1,16,1,3,224,224)
-        vaet_video = torch.as_tensor(vaet_video).float()
-        vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
-        b, pair, bs, ts, channel, h, w = vaet_video.shape
-        vaet_video = vaet_video.view(b*pair,3,224,224,video_frame)
+        # vaet_video = video.view(-1,1,16,1,3,224,224) 
+        # vaet_video = torch.as_tensor(vaet_video).float()
+        # vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
+        # b, pair, bs, ts, channel, h, w = vaet_video.shape
+        # vaet_video = vaet_video.view(b*pair,3,224,224,video_frame) # 16 3 224 224 16
         # b : 16 pair : 1 bs : 1 ts : 3 channel : 224 h : 224 : w : 16
-        print("b : {} pair : {} bs : {} ts : {} channel : {} h : {} w : {}".format(b,pair,bs,ts,channel,h,w))
+        #print("b : {} pair : {} bs : {} ts : {} channel : {} h : {} w : {}".format(b,pair,bs,ts,channel,h,w))
         #a = input()
         bs_pair = video_mask.size(0)
-        
+        print("<<<<<<<<vaet_video shape : {}>>>>>>>>".format(vaet_video.shape))
         decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame).float()
-
+        print("decoded shape : {}".format(decoded.shape))
         return decoded
         
 
