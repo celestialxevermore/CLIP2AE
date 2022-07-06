@@ -12,18 +12,11 @@ import time
 import argparse
 from modules.tokenization_clip import SimpleTokenizer as ClipTokenizer
 from modules.file_utils import PYTORCH_PRETRAINED_BERT_CACHE
-from modules.Mymodeling import CLIP4Clip
+from modules.modeling import CLIP4Clip
 from modules.optimization import BertAdam
 
 from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
-
-import os
-#os.environ["PL_TORCH_DISTRIBUTED_BACKEND"]="gloo"
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"]="6"
-
-
 
 torch.distributed.init_process_group(backend="nccl")
 
@@ -106,7 +99,7 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument('--linear_patch', type=str, default="2d", choices=["2d", "3d"],
                         help="linear projection of flattened patches.")
     parser.add_argument('--sim_header', type=str, default="meanP",
-                        choices=["meanP", "seqLSTM", "seqTransf", "tightTransf"],
+                        choices=["meanP", "seqLSTM", "seqTransf", "tightTransf","clip4clip"],
                         help="choice a similarity header.")
 
     parser.add_argument("--pretrained_clip_name", default="ViT-B/32", type=str, help="Choose a CLIP version")
@@ -114,9 +107,8 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     args = parser.parse_args()
 
     if args.sim_header == "tightTransf":
-        print("<<<<<<<<<<<<sim_header == tightTransf>>>>>>>>>>")
         args.loose_type = False
-    #print("<<<<<<<<<<<<sim_header != tightTransf>>>>>>>>>>")
+
     # Check paramenters
     if args.gradient_accumulation_steps < 1:
         raise ValueError("Invalid gradient_accumulation_steps parameter: {}, should be >= 1".format(
@@ -142,7 +134,6 @@ def set_seed_logger(args):
 
     world_size = torch.distributed.get_world_size()
     torch.cuda.set_device(args.local_rank)
-   
     args.world_size = world_size
     rank = torch.distributed.get_rank()
     args.rank = rank
@@ -188,7 +179,7 @@ def init_model(args, device, n_gpu, local_rank):
     model.to(device)
 
     return model
-#### 20220524
+
 def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, local_rank, coef_lr=1.):
 
     if hasattr(model, 'module'):
@@ -219,11 +210,10 @@ def prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, loc
                          schedule='warmup_cosine', b1=0.9, b2=0.98, e=1e-6,
                          t_total=num_train_optimization_steps, weight_decay=weight_decay,
                          max_grad_norm=1.0)
-    
-    print("<<<<before DDP>>>>")
+
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                       output_device=local_rank, find_unused_parameters=True)
-    print("<<<<after DDP>>>>")
+
     return optimizer, scheduler, model
 
 def save_model(epoch, args, model, optimizer, tr_loss, type_name=""):
@@ -273,12 +263,6 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
             batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
 
         input_ids, input_mask, segment_ids, video, video_mask = batch
-        # print("input_ids : {} video : {} ".format(input_ids,video))
-        # input_ = input()
-        # #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
-        
-        #video = torch.HalfTensor(video)
-        ##### 20220613 이 부분에 loss를 추가할 것. 
         loss = model(input_ids, segment_ids, input_mask, video, video_mask)
 
         if n_gpu > 1:
@@ -331,9 +315,7 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
             b1b2_logits = b1b2_logits.cpu().detach().numpy()
             each_row.append(b1b2_logits)
         each_row = np.concatenate(tuple(each_row), axis=-1)
-        sim_matrix.append(each_row.astype(np.float32))
-    
-    print("run on single gpu : {}".format(sim_matrix)) # 2
+        sim_matrix.append(each_row)
     return sim_matrix
 
 def eval_epoch(args, model, test_dataloader, device, n_gpu):
@@ -359,14 +341,12 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         sentence_num_ = test_dataloader.dataset.sentence_num
         video_num_ = test_dataloader.dataset.video_num
         cut_off_points_ = [itm - 1 for itm in cut_off_points_]
-        print("multi_sentence : {} cut_off_points : {} sentence_num : {} video_num_ : {}".format(multi_sentence_,cut_off_points_,sentence_num_,video_num_))
-        #sentnece_num : 606 video_num : 16 
+
     if multi_sentence_:
         logger.warning("Eval under the multi-sentence per video clip setting.")
         logger.warning("sentence num: {}, video num: {}".format(sentence_num_, video_num_))
-    print("<<<<<<<<<before model evaluation >>>>>>>>>>")
+
     model.eval()
-    print("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<After model evaluation >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
     with torch.no_grad():
         batch_list_t = []
         batch_list_v = []
@@ -377,12 +357,9 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         # 1. cache the features
         # ----------------------------
         for bid, batch in enumerate(test_dataloader):
-            print("test dataloader bid : {} batch : {}".format(bid,batch))
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
-            
-            print("processing..")
-            #print("input_ids shape : {} input_mask : {} segment_ids : {} video shape : {} video_mask : {}".format(input_ids.shape,input_mask.shape,segment_ids.shape,video.shape, video_mask))
+
             if multi_sentence_:
                 # multi-sentences retrieval means: one clip has two or more descriptions.
                 b, *_t = video.shape
@@ -395,13 +372,12 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
 
                 if len(filter_inds) > 0:
                     video, video_mask = video[filter_inds, ...], video_mask[filter_inds, ...]
-                    
-                    visual_output,_,_ = model.get_visual_output(video, video_mask)
+                    visual_output = model.get_visual_output(video, video_mask)
                     batch_visual_output_list.append(visual_output)
                     batch_list_v.append((video_mask,))
                 total_video_num += b
             else:
-                sequence_output, visual_output,_,_ = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
+                sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
 
                 batch_sequence_output_list.append(sequence_output)
                 batch_list_t.append((input_mask, segment_ids,))
@@ -451,30 +427,22 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
         else:
             sim_matrix = _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_list, batch_visual_output_list)
-            print("1 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
-            sim_matrix_weird = sim_matrix
-            
-            #sim_matrix_weird = np.concatenate(tuple(sim_matrix),axis=0)
+            print("중요!!! 1 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
             print("2 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
-            # 
     if multi_sentence_:
-        print("multi_sentence : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
-        # (606,)
-        print("<<<<<<<<<<<<>>>>>>>>>>>>>>>>")
-        print("weird : sim_matrix_weird : {} sim_matrix_weird type : {} sim_matrix_weird len : {}".format(sim_matrix_weird,type(sim_matrix),len(sim_matrix_weird)))
-        #sim_matrix=[]
-        # print("<<<<< sim_matrix_weird : {}".format(sim_matrix_weird))
-        # for i in range(len(sim_matrix_weird)):
-        #     sim_matrix.append(sim_matrix_weird[i])
         logger.info("before reshape, sim matrix size: {} x {}".format(sim_matrix.shape[0], sim_matrix.shape[1]))
         cut_off_points2len_ = [itm + 1 for itm in cut_off_points_]
         max_length = max([e_-s_ for s_, e_ in zip([0]+cut_off_points2len_[:-1], cut_off_points2len_)])
         sim_matrix_new = []
+        print("왜 안뜸?")
         for s_, e_ in zip([0] + cut_off_points2len_[:-1], cut_off_points2len_):
             sim_matrix_new.append(np.concatenate((sim_matrix[s_:e_],
                                                   np.full((max_length-e_+s_, sim_matrix.shape[1]), -np.inf)), axis=0))
+        
+        print("sim_matrix_new shape : {}".format(len(sim_matrix_new)))
         sim_matrix = np.stack(tuple(sim_matrix_new), axis=0)
+
         logger.info("after reshape, sim matrix size: {} x {} x {}".
                     format(sim_matrix.shape[0], sim_matrix.shape[1], sim_matrix.shape[2]))
 
@@ -505,9 +473,8 @@ def main():
     tokenizer = ClipTokenizer()
 
     assert  args.task_type == "retrieval"
-    print("args : {} device : {} n_gpu : {} args.local_rank : {}".format(args,device,n_gpu,args.local_rank))
     model = init_model(args, device, n_gpu, args.local_rank)
-    
+
     ## ####################################
     # freeze testing
     ## ####################################
@@ -562,15 +529,13 @@ def main():
     # train and eval
     ## ####################################
     if args.do_train:
-        #torch.backends.cudnn.enabled = False
-        #### train_sampler : 20220524 확인
         train_dataloader, train_length, train_sampler = DATALOADER_DICT[args.datatype]["train"](args, tokenizer)
         num_train_optimization_steps = (int(len(train_dataloader) + args.gradient_accumulation_steps - 1)
                                         / args.gradient_accumulation_steps) * args.epochs
 
         coef_lr = args.coef_lr
         optimizer, scheduler, model = prep_optimizer(args, model, num_train_optimization_steps, device, n_gpu, args.local_rank, coef_lr=coef_lr)
-        print("<start>")
+
         if args.local_rank == 0:
             logger.info("***** Running training *****")
             logger.info("  Num examples = %d", train_length)
