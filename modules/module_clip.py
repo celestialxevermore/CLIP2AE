@@ -370,7 +370,7 @@ class VAeT(nn.Module):
         #x = x.reshape(-1, x.shape[-4],x.shape[-3], x.shape[-2], video_frame)
         #x = torch.FloatTensor(x,dtype= float8)
         encoded, decoded = self.AE(x)
-        print("20220628 encoded shape : {}".format(encoded.shape)) # 32 3 224 224 1 
+        #print("20220628 encoded shape : {}".format(encoded.shape)) # 32 3 224 224 1 
         #x = torch.cuda.HalfTensor(x)
         #print("before : <<<<<< {} >>>>>".format(type(encoded)))
 
@@ -378,17 +378,10 @@ class VAeT(nn.Module):
         encoded = torch.cuda.HalfTensor(encoded.half())
         encoded = encoded.permute(0,1,4,2,3) # 32 3 1 224 224 
         x = self.conv2(encoded) # result : 32 768 
-<<<<<<< HEAD
-        print("20220628 x shape : ",x.shape) # 32 768 1 7 7
+        #print("20220628 x shape : ",x.shape) # 32 768 1 7 7
         #x = x.to(torch.float16)
         #x = torch.cuda.HalfTensor(x)
         #print("after : <<<<< {} >>>>VA>".format(type(x)))
-=======
-        print("20220628 x shape : ",x.shape)
-        #x = x.to(torch.float16)
-        #x = torch.cuda.HalfTensor(x)
-        #print("after : <<<<< {} >>>>>".format(type(x)))
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         
         #20220628 수정 아래 코드 주석
         #x = x.permute(0,4,1,3,2)
@@ -401,11 +394,7 @@ class VAeT(nn.Module):
         #x = x + self.positional_embedding.to(x.dtype) 
         x = self.ln_pre(x)
         x = x.permute(1,0,2).contiguous()
-<<<<<<< HEAD
-        print("20220628 x shape VaeT 어디서 계속 콜되는중!!!: {}".format(x.shape)) # 50 32 768
-=======
-        print("20220628 x : {}".format(x.shape))
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
+        #print("20220628 x shape VaeT 어디서 계속 콜되는중!!!: {}".format(x.shape)) # 50 32 768
         x = self.transformer(x,video_frame=1)
         x = x.permute(1,0,2).contiguous()
         return x, decoded
@@ -498,12 +487,8 @@ class CLIP(nn.Module):
             )
         else:
             vision_heads = vision_width // 64
-<<<<<<< HEAD
             ##### 1. VAeT #####
             self.vaet = VAeT(
-=======
-            self.visual = VAeT(
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
                 input_resolution=image_resolution,
                 patch_size=vision_patch_size,
                 width=vision_width,
@@ -512,7 +497,6 @@ class CLIP(nn.Module):
                 output_dim=embed_dim,
                 linear_patch=linear_patch
             )
-<<<<<<< HEAD
             ##### 2. VisualTransformer #####
             self.visual = VisualTransformer(
             input_resolution=image_resolution,
@@ -524,9 +508,6 @@ class CLIP(nn.Module):
             linear_patch=linear_patch
         )
         ##### 3. Text transformer #####
-=======
-
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         self.transformer = Transformer(
             width=transformer_width,
             layers=transformer_layers,
@@ -610,20 +591,14 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
-<<<<<<< HEAD
     # input : video(4D) video_frame : bs * ts
     ##### 원래 CLIP4Clip에서 쓰는 원형
     def encode_image(self, image, return_hidden=False, video_frame=-1):
-<<<<<<<< HEAD:modules/module_clip.py
 
         hidden = self.visual(image.type(self.dtype), video_frame=video_frame)
-========
-        hidden,_ = self.visual(image.type(self.dtype), video_frame=video_frame)
->>>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e:modules/my_module_clip.py
         hidden = self.visual.ln_post(hidden) @ self.visual.proj
-        print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
+
         x = hidden[:, 0, :]
-<<<<<<<< HEAD:modules/module_clip.py
 
         if return_hidden:
             return x, hidden
@@ -634,31 +609,18 @@ class CLIP(nn.Module):
     ##### VAeT(encoded,decoded)를 통과한 visual x'
     #vaet_image가 들어가기 때문에 5차원임. 
     def encode_vaet_x_image(self, image, return_hidden=False, video_frame=-1):
-        print("<<<<<encode_vaet_x_image에 들어온 image shape : ",image.shape)
+        #print("<<<<<encode_vaet_x_image에 들어온 image shape : ",image.shape)
         hidden,_ = self.vaet(image.type(self.dtype), video_frame=video_frame)
         hidden = self.vaet.ln_post(hidden) @ self.vaet.proj
         #print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
         x = hidden[:, 0, :]
         #print("x type :",type(x))
-========
-        print("x type :",type(x))
->>>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e:modules/my_module_clip.py
-=======
-    def encode_image(self, image, return_hidden=False, video_frame=-1):
-        hidden,_ = self.visual(image.type(self.dtype), video_frame=video_frame)
-        hidden = self.visual.ln_post(hidden) @ self.visual.proj
-        print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
-        x = hidden[:, 0, :]
-        print("x type :",type(x))
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         if return_hidden:
             return x, hidden
         hidden = hidden.type(self.dtype)
         _ = _.type(self.dtype)
-<<<<<<< HEAD
-<<<<<<<< HEAD:modules/module_clip.py
         #print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
-        print("<<<<< encode_vaet_x_image x shape : {}>>>>>".format(x.shape))
+        #print("<<<<< encode_vaet_x_image x shape : {}>>>>>".format(x.shape))
         return x 
     
     #### VAeT(encoded, decoded)를 통과한 두 객체 중 decoded만을 취함.
@@ -666,47 +628,18 @@ class CLIP(nn.Module):
     def encode_vaet_decoded_image(self,image,return_hidden=False,video_frame=-1):
         #print("<<<encode_vaet_decoded_image shape : {} >>>".format(image.shape))
         #a= input()
-        print("<<<<<encode_vaet_decoded_image에 들어온 image shape : ",image.shape)
+        #print("<<<<<encode_vaet_decoded_image에 들어온 image shape : ",image.shape)
         _,decoded = self.vaet(image.type(self.dtype), video_frame=video_frame)
         _ = self.vaet.ln_post(_) @ self.vaet.proj
         #print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
         x = _[:, 0, :]
         #print("x type :",type(x))
-========
-=======
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
-        print("hidden type {} decoded type {} ".format(type(hidden),type(_)))
-        return x 
-    
-    def encode_vaet_image(self,image,return_hidden=False,video_frame=-1):
-        print("<<<image shape : {} >>>".format(image.shape))
-<<<<<<< HEAD
-=======
-        #a= input()
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
-        _,decoded = self.visual(image.type(self.dtype), video_frame=video_frame)
-        _ = self.visual.ln_post(_) @ self.visual.proj
-        print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
-        x = _[:, 0, :]
-        print("x type :",type(x))
-<<<<<<< HEAD
->>>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e:modules/my_module_clip.py
-=======
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         if return_hidden:
             return x, _
         _ = _.type(self.dtype)
         decoded = decoded.type(self.dtype)
-<<<<<<< HEAD
-<<<<<<<< HEAD:modules/module_clip.py
         #print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
-        print("<<<<< encode_vaet_decoded_image decoded shape : {}>>>>>".format(decoded.shape))
-========
-        print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
->>>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e:modules/my_module_clip.py
-=======
-        print("hidden type {} decoded type {} ".format(type(_),type(decoded)))
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
+        #print("<<<<< encode_vaet_decoded_image decoded shape : {}>>>>>".format(decoded.shape))
         return decoded
 
     def encode_text(self, text, return_hidden=False):
@@ -730,17 +663,9 @@ class CLIP(nn.Module):
         return x
 
     def forward(self, image, text):
-<<<<<<< HEAD
-<<<<<<<< HEAD:modules/module_clip.py
-        print("20220706 image shape : ",image.shape)
+        #print("20220706 image shape : ",image.shape)
         image_features = self.encode_image(image)
         #image_features = self.encode_vaet_x_image(image)
-========
-        image_features = self.encode_image(image)
->>>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e:modules/my_module_clip.py
-=======
-        image_features = self.encode_image(image)
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         text_features = self.encode_text(text)
 
         # normalized features

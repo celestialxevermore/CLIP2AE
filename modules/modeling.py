@@ -221,7 +221,8 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         convert_weights(self.clip)
         # <=== End of CLIP Encoders
 
-        self.sim_header = 'meanP'
+        self.sim_header = task_config.sim_header
+
         # if hasattr(task_config, "sim_header"):
         #     self.sim_header = task_config.sim_header
         #     show_log(task_config, "\t sim_header: {}".format(self.sim_header))
@@ -247,11 +248,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         self.loss_fct = CrossEn()
 
         self.apply(self.init_weights)
-<<<<<<< HEAD
     # video : 7D
-=======
-
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
     def forward(self, input_ids, token_type_ids, attention_mask, video, video_mask=None):
         input_ids = input_ids.view(-1, input_ids.shape[-1])
         token_type_ids = token_type_ids.view(-1, token_type_ids.shape[-1])
@@ -268,12 +265,11 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         video = video.view(b * pair * bs * ts, channel, h, w)
         video_frame = bs * ts
         vaet_video = vaet_video.reshape(-1,channel,h,w,video_frame)
-<<<<<<< HEAD
-        print("forward에서 vaet_video의 차원 :",vaet_video.shape)
+        #print("forward에서 vaet_video의 차원 :",vaet_video.shape)
         ####
         if self.sim_header == "clip4clip":
             sequence_output, visual_output= self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask, video, video_mask, shaped=True, video_frame=video_frame)
-        elif self.sim_header =="meanP":
+        elif self.sim_header =="clip2ae":
             sequence_output, visual_output = self.get_sequence_vaet_output(input_ids, token_type_ids, attention_mask, vaet_video, video_mask, shaped=True, video_frame=video_frame)
             
 
@@ -282,18 +278,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         if len(visual_output.shape)!=3:
             a= input("forward에서 지금 visual_output(vaet)의 차원이 5차원이 아님!")
 
-=======
-        
-        ####
-        
-
-        sequence_output, visual_output= self.get_sequence_visual_output(input_ids, token_type_ids, attention_mask,
-                                                                         video, video_mask, shaped=True, video_frame=video_frame)
-
-        print("first vaet_video shape : {}".format(vaet_video.shape))
-        decoded_output = self.get_vaet_visual_output(vaet_video,video_mask,shaped=True,video_frame = video_frame)
-        print("decoded output shape : {} vaet_video shape : {}".format(decoded_output.shape,vaet_video.shape))
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         #@a = input()
         if self.training:
             loss = 0.
@@ -305,18 +289,16 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             loss += sim_loss
 
             vaet_video = vaet_video.view(-1,vaet_video.shape[-4],vaet_video.shape[-3],vaet_video.shape[-2],vaet_video.shape[-1])
-<<<<<<< HEAD
             
             
-            mse_loss = self.get_mse_loss(decoded_output,vaet_video)
-            logger.info("contrastive loss : {} mse loss : {}".format(loss,mse_loss))
-            loss += mse_loss * 0.8
-            logger.info("total loss : {}".format(loss))
-=======
-            print("Reshaped vaet_video shape :",vaet_video.shape)
-            mse_loss = self.get_mse_loss(decoded_output,vaet_video)
-            loss += mse_loss
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
+            if self.sim_header == "clip4clip":
+                pass 
+            elif self.sim_header == "clip2ae":
+                mse_loss = self.get_mse_loss(decoded_output,vaet_video)
+                print("<<<<<contrastive loss : {} mse loss : {}>>>>>".format(loss,mse_loss))
+                loss += mse_loss
+            
+            print("<<<<<total loss : {}>>>>>".format(loss))
             return loss
         else:
             return None
@@ -344,7 +326,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             video = video.view(b * pair * bs * ts, channel, h, w)
             video_frame = bs * ts
         
-<<<<<<< HEAD
         # vaet_video = video.view(-1,1,16,1,3,224,224)
         # vaet_video = torch.as_tensor(vaet_video).float()
         # vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
@@ -371,33 +352,12 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         return visual_hidden
 
     def get_vaet_output(self,vaet_video,video_mask,shaped=False,video_frame=-1):
-=======
-        vaet_video = video.view(-1,1,16,1,3,224,224)
-        vaet_video = torch.as_tensor(vaet_video).float()
-        vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
-        vaet_video = vaet_video.reshape(vaet_video.shape[0] * vaet_video.shape[1],3,224,224,16)
-        bs_pair = video_mask.size(0)
-        print("<<<<vaet_video type : {} video_frame type : {}".format(type(vaet_video),type(video_frame)))
-        visual_hidden = self.clip.encode_image(vaet_video, video_frame=video_frame).float()
-        #decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame)
-        #print("<<<<type of visual_hidden, decoded : {} {}".format(type(visual_hidden),type(decoded)))
-        #print("visaul hidden shape : {} decoded shape : {}".format(visual_hidden.shape, decoded.shape))
-        visual_hidden = visual_hidden.type(self.dtype)
-        #decoded = decoded.type(self.dtype)
-        #a = input()
-        #visual_hidden = visual_hidden.view(bs_pair, -1, visual_hidden.size(-1))
-
-        return visual_hidden
-
-    def get_vaet_visual_output(self,vaet_video,video_mask,shaped=False,video_frame=-1):
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         
         if shaped is False: #7차원이 들어와버린 경우
             video_mask = video_mask.view(-1, video_mask.shape[-1])
             video = torch.as_tensor(video).float()
             b, pair, bs, ts, channel, h, w = video.shape
         
-<<<<<<< HEAD
         bs_pair = video_mask.size(0)
         
 
@@ -405,7 +365,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             a = input("get_vaet_output에서 지금 veat_video가 5차원이 아님!")
         
         decoded = self.clip.encode_vaet_decoded_image(vaet_video,video_frame=video_frame).float()
-        print("decoded shape : {}".format(decoded.shape))
+        #print("decoded shape : {}".format(decoded.shape))
         return decoded
     
     def get_x_output(self,vaet_video,video_mask,shaped=False,video_frame=-1):
@@ -423,22 +383,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         x_hidden = x_hidden.type(self.dtype) 
 
         return x_hidden
-=======
-        # vaet_video = video.view(-1,1,16,1,3,224,224) 
-        # vaet_video = torch.as_tensor(vaet_video).float()
-        # vaet_video = vaet_video.permute(0,1,3,4,5,6,2).contiguous()
-        # b, pair, bs, ts, channel, h, w = vaet_video.shape
-        # vaet_video = vaet_video.view(b*pair,3,224,224,video_frame) # 16 3 224 224 16
-        # b : 16 pair : 1 bs : 1 ts : 3 channel : 224 h : 224 : w : 16
-        #print("b : {} pair : {} bs : {} ts : {} channel : {} h : {} w : {}".format(b,pair,bs,ts,channel,h,w))
-        #a = input()
-        bs_pair = video_mask.size(0)
-        print("<<<<<<<<vaet_video shape : {}>>>>>>>>".format(vaet_video.shape))
-        decoded = self.clip.encode_vaet_image(vaet_video,video_frame=video_frame).float()
-        print("decoded shape : {}".format(decoded.shape))
-        return decoded
-        
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
 
 
     def get_sequence_visual_output(self, input_ids, token_type_ids, attention_mask, video, video_mask, shaped=False, video_frame=-1):
@@ -455,7 +399,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         sequence_output = self.get_sequence_output(input_ids, token_type_ids, attention_mask, shaped=True)
         visual_output = self.get_visual_output(video, video_mask, shaped=True, video_frame=video_frame)
-<<<<<<< HEAD
         
         return sequence_output, visual_output
 
@@ -475,11 +418,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         return sequence_output, vaet_output
 
 
-=======
-        #decoded_output = self.get_vaet_visual_output(video,video_mask,shaped=True,video_frame=video_frame)
-        return sequence_output, visual_output
-
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
     def _get_cross_output(self, sequence_output, visual_output, attention_mask, video_mask):
 
         concat_features = torch.cat((sequence_output, visual_output), dim=1)  # concatnate tokens and frames
@@ -514,21 +452,12 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         return text_out, video_out
 
-<<<<<<< HEAD
     def _loose_similarity(self, sequence_output, visual_output, attention_mask, video_mask, sim_header="clip4clip"):
         #sequence_output, visual_output = sequence_output.type(self.dtype), visual_output.type(self.dtype)
         #print("before : s o type : {} v p type : {}".format(type(sequence_output),type(visual_output)))
         # sequence_output = torch.as_tensor(sequence_output)
         # visual_output = torch.as_tensor(visual_output)
         if sim_header == "clip4clip":
-=======
-    def _loose_similarity(self, sequence_output, visual_output, attention_mask, video_mask, sim_header="meanP"):
-        #sequence_output, visual_output = sequence_output.type(self.dtype), visual_output.type(self.dtype)
-        print("before : s o type : {} v p type : {}".format(type(sequence_output),type(visual_output)))
-        # sequence_output = torch.as_tensor(sequence_output)
-        # visual_output = torch.as_tensor(visual_output)
-        if sim_header == "meanP":
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
             # Default: Parameter-free type
             pass
         elif sim_header == "seqLSTM":
@@ -562,7 +491,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             video_mask = allgather(video_mask, self.task_config)
             sequence_output = allgather(sequence_output, self.task_config)
             torch.distributed.barrier()
-<<<<<<< HEAD
         
 
 
@@ -580,13 +508,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         visual_output = visual_output / visual_output.norm(dim=-1, keepdim=True)
 
 
-=======
-
-        visual_output = visual_output / visual_output.norm(dim=-1, keepdim=True)
-        #20220627
-        #visual_output = self._mean_pooling_for_similarity_visual(visual_output, video_mask)
-        #visual_output = visual_output / visual_output.norm(dim=-1, keepdim=True)
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
 
         sequence_output = sequence_output.squeeze(1)
         sequence_output = sequence_output / sequence_output.norm(dim=-1, keepdim=True)
@@ -595,9 +516,8 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         retrieve_logits = logit_scale * torch.matmul(sequence_output, visual_output.t())
         return retrieve_logits
 
-<<<<<<< HEAD
-    def _vaet_similarity(self, sequence_output, vaet_output, attention_mask, video_mask, sim_header="meanP"):
-        if sim_header == "meanP":
+    def _vaet_similarity(self, sequence_output, vaet_output, attention_mask, video_mask, sim_header="clip2ae"):
+        if sim_header == "clip2ae":
             # Default: Parameter-free type
             pass
         elif sim_header == "seqLSTM":
@@ -625,7 +545,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         sequence_output = sequence_output / sequence_output.norm(dim=-1, keepdim=True)
 
         logit_scale = self.clip.logit_scale.exp()
-        print("<<<<<아마 여기서 오류가 날 것 같음. vaet_output의 차원이 sequence_output과 다르기 때문!!!>>>>>")
+        
         retrieve_logits = logit_scale * torch.matmul(sequence_output, vaet_output.t())
         
         return retrieve_logits
@@ -633,8 +553,6 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
 
 
-=======
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
     def _cross_similarity(self, sequence_output, visual_output, attention_mask, video_mask):
         sequence_output, visual_output = sequence_output.contiguous(), visual_output.contiguous()
 
@@ -685,18 +603,17 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         contrastive_direction = ()
         if loose_type:
-<<<<<<< HEAD
-            assert self.sim_header in ["clip4clip", "seqLSTM", "seqTransf","meanP"]
+            assert self.sim_header in ["clip4clip", "seqLSTM", "seqTransf","clip2ae"]
             if self.sim_header == "clip4clip":
+                print("<<<<< _loose_similarity called >>>>>")
+                print("visual output shape :",visual_output.shape)
                 retrieve_logits = self._loose_similarity(sequence_output, visual_output, attention_mask, video_mask, sim_header=self.sim_header)
-            elif self.sim_header == "meanP":
+            elif self.sim_header == "clip2ae":
+                print("<<<<<_vaet_similarity called >>>>>")
+                print("visual output shape :",visual_output.shape)
                 retrieve_logits = self._vaet_similarity(sequence_output,visual_output,attention_mask, video_mask, sim_header=self.sim_header)
 
                 
-=======
-            assert self.sim_header in ["meanP", "seqLSTM", "seqTransf"]
-            retrieve_logits = self._loose_similarity(sequence_output, visual_output, attention_mask, video_mask, sim_header=self.sim_header)
->>>>>>> 030eece0d55405de6d40f8022ec86108c10c881e
         else:
             assert self.sim_header in ["tightTransf"]
             retrieve_logits = self._cross_similarity(sequence_output, visual_output, attention_mask, video_mask, )
