@@ -17,6 +17,8 @@ from modules.optimization import BertAdam
 
 from util import parallel_apply, get_logger
 from dataloaders.data_dataloaders import DATALOADER_DICT
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]="5"
 
 torch.distributed.init_process_group(backend="nccl")
 
@@ -263,6 +265,7 @@ def train_epoch(epoch, args, model, train_dataloader, device, n_gpu, optimizer, 
             batch = tuple(t.to(device=device, non_blocking=True) for t in batch)
 
         input_ids, input_mask, segment_ids, video, video_mask = batch
+        print("main_task_retrieval / sim_header :",args.sim_header)
         loss = model(input_ids, segment_ids, input_mask, video, video_mask)
 
         if n_gpu > 1:
@@ -309,7 +312,10 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
         each_row = []
         for idx2, b2 in enumerate(batch_list_v):
             video_mask, *_tmp = b2
-            visual_output = batch_visual_output_list[idx2]
+            visual_output = batch_visual_output_list[idx2] # 여기서 지금 visual_output 이 1 11 512가 계속 발견된다는 소리임
+            #print("RUN ON SINGLE GPU에서 뭐 문제 있는거 아냐? ",visual_output.shape) 
+            # clip4clip일 때에는 1 16 512 잘 넘어옴
+            # clip2ae일 때에는 1 11 512 발견됨
             b1b2_logits, *_tmp = model.get_similarity_logits(sequence_output, visual_output, input_mask, video_mask,
                                                                      loose_type=model.loose_type)
             b1b2_logits = b1b2_logits.cpu().detach().numpy()
@@ -341,7 +347,7 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         sentence_num_ = test_dataloader.dataset.sentence_num
         video_num_ = test_dataloader.dataset.video_num
         cut_off_points_ = [itm - 1 for itm in cut_off_points_]
-
+        print("multi_sentence : {} cut_off_points : {} sentencce_num : {} video_mum_ : {}".format(multi_sentence_,cut_off_points_,sentence_num_,video_num_))
     if multi_sentence_:
         logger.warning("Eval under the multi-sentence per video clip setting.")
         logger.warning("sentence num: {}, video num: {}".format(sentence_num_, video_num_))
@@ -359,25 +365,63 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         for bid, batch in enumerate(test_dataloader):
             batch = tuple(t.to(device) for t in batch)
             input_ids, input_mask, segment_ids, video, video_mask = batch
+            
+            video_ = video
+
+            print("video_ shape : {} video shape : {} video_mask : {}".format(video_.shape,video.shape,video_mask.shape))
+            # 16 x 1 x 16 x 1 x 3 x 224 x 224 
 
             if multi_sentence_:
                 # multi-sentences retrieval means: one clip has two or more descriptions.
-                b, *_t = video.shape
+                b, *_t = video.shape 
+                
                 sequence_output = model.get_sequence_output(input_ids, segment_ids, input_mask)
                 batch_sequence_output_list.append(sequence_output)
                 batch_list_t.append((input_mask, segment_ids,))
 
                 s_, e_ = total_video_num, total_video_num + b
+                print("s_ : {} e_ : {}".format(s_,e_))
                 filter_inds = [itm - s_ for itm in cut_off_points_ if itm >= s_ and itm < e_]
-
+                print("filter_inds :",filter_inds)
                 if len(filter_inds) > 0:
-                    video, video_mask = video[filter_inds, ...], video_mask[filter_inds, ...]
-                    visual_output = model.get_visual_output(video, video_mask)
+                    
+                    video, video_mask = video[filter_inds, ...], video_mask[filter_inds, ...] # video : 5 x 3 x 224 x 224 # video_mask : 5 x 1 x 16
+                    # 1 x 1 x 16 x 1 x 3 x 224 x 224
+                    print("이건 video의 하나가 나올 것임 :",video.shape) #
+                    print("이건 video_mask의 하나가 나올 것임 :",video_mask.shape)
+                    
+                    visual_output = model.get_visual_output(video,video_mask)
+                    #print("20220709 original video shape ",video.shape)
+                    #video_ = video
+                    vaet_video = video.permute(0,1,3,4,5,6,2).contiguous()
+                    #print("before vaet_video shape :",vaet_video.shape) # 16 x 1 x 1 x 3 x 224 x 224 x 16
+                    b, pair, bs, ts, channel, h, w = video.shape
+                    #video_ = video_.view(b * pair * bs * ts, channel, h, w)
+                    #video_frame = bs * ts
+                    vaet_video = vaet_video.view(-1,vaet_video.shape[-4],vaet_video.shape[-3],vaet_video.shape[-2],vaet_video.shape[-1])
+                    video_frame = vaet_video.shape[-1]
+                    print("20220709 vaet video shape 1 x 3 x 224 x 224 x 16: ",vaet_video.shape)
+
+                    # if args.sim_header == "clip4clip":
+
+                    #     print("20220709 visual output 들어가기 전 video에서 혹시 11있으면 레전드 :",video.shape)
+                    #     # video : 1 x 1 x 16 x 1 x 3 x 224 x 224
+                    #     visual_output = model.get_visual_output(video, video_mask)
+                        
+                    # elif args.sim_header == "clip2ae":
+                    #     visual_output = model.get_x_output(vaet_video,video_mask,shaped=True, video_frame = video_frame )
+                    #     #print("main_task_retrieval / visual_output(vaet_output) shape :",visual_output.shape)
+                    
                     batch_visual_output_list.append(visual_output)
                     batch_list_v.append((video_mask,))
                 total_video_num += b
             else:
-                sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
+                if args.sim_header =="clip4clip":
+                    sequence_output, visual_output = model.get_sequence_visual_output(input_ids, segment_ids, input_mask, video, video_mask)
+                    
+                elif args.sim_header == "clip2ae":
+                    sequence_output, visual_output = model.get_sequence_vaet_output(input_ids, segment_ids, input_mask, vaet_video, video_mask, shaped=True, video_frame=video_frame)
+                   
 
                 batch_sequence_output_list.append(sequence_output)
                 batch_list_t.append((input_mask, segment_ids,))
@@ -426,16 +470,17 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
                 sim_matrix += parallel_outputs[idx]
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
         else:
+            print("batch_list_t : {} batch_list_v : {} batch_sequence_output_list : {} batch_visual_output_list : {}".format(len(batch_list_t),len(batch_list_v),len(batch_sequence_output_list),len(batch_visual_output_list)))
             sim_matrix = _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_list, batch_visual_output_list)
-            print("중요!!! 1 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
+            #print("중요!!! 1 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
             sim_matrix = np.concatenate(tuple(sim_matrix), axis=0)
-            print("2 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
+            #print("2 run on single gpu : <<<<<<sim_matrix : {} sim matrix type : {} sim matrix len : {}>>>>>>>>>".format(sim_matrix,type(sim_matrix),len(sim_matrix)))
     if multi_sentence_:
         logger.info("before reshape, sim matrix size: {} x {}".format(sim_matrix.shape[0], sim_matrix.shape[1]))
         cut_off_points2len_ = [itm + 1 for itm in cut_off_points_]
         max_length = max([e_-s_ for s_, e_ in zip([0]+cut_off_points2len_[:-1], cut_off_points2len_)])
         sim_matrix_new = []
-        print("왜 안뜸?")
+        
         for s_, e_ in zip([0] + cut_off_points2len_[:-1], cut_off_points2len_):
             sim_matrix_new.append(np.concatenate((sim_matrix[s_:e_],
                                                   np.full((max_length-e_+s_, sim_matrix.shape[1]), -np.inf)), axis=0))
