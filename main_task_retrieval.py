@@ -98,8 +98,8 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
                         help="0: cut from head frames; 1: cut from tail frames; 2: extract frames uniformly.")
     parser.add_argument('--linear_patch', type=str, default="2d", choices=["2d", "3d"],
                         help="linear projection of flattened patches.")
-    parser.add_argument('--sim_header', type=str, default="meanP",
-                        choices=["meanP", "seqLSTM", "seqTransf", "tightTransf","clip4clip"],
+    parser.add_argument('--sim_header', type=str, default="clip2ae",
+                        choices=["clip2ae", "seqLSTM", "seqTransf", "tightTransf","clip4clip"],
                         help="choice a similarity header.")
 
     parser.add_argument("--pretrained_clip_name", default="ViT-B/32", type=str, help="Choose a CLIP version")
